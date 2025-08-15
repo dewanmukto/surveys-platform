@@ -12,7 +12,7 @@ import { FormsService, type Form } from "@/lib/forms"
 import { Icon } from "@iconify/react"
 
 export default function DashboardPage() {
-  const { user, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const [forms, setForms] = useState<Form[]>([])
   const [stats, setStats] = useState({
     totalForms: 0,
@@ -29,12 +29,12 @@ export default function DashboardPage() {
   }, [user])
 
   const loadDashboardData = async () => {
-    if (!user) return
+    if (!user || !profile) return
 
     try {
       const [userForms, dashboardStats] = await Promise.all([
-        FormsService.getUserForms(user.id),
-        FormsService.getDashboardStats(user.id),
+        FormsService.getUserForms(profile.id),
+        FormsService.getDashboardStats(profile.id),
       ])
 
       setForms(userForms)
@@ -45,9 +45,9 @@ export default function DashboardPage() {
   }
 
   const handleCreateForm = async (title: string, description: string) => {
-    if (!user) return
+    if (!user || !profile) return
 
-    const newForm = await FormsService.createForm(user.id, title, description)
+    const newForm = await FormsService.createForm(profile.id, title, description)
     setForms((prev) => [newForm, ...prev])
     setStats((prev) => ({ ...prev, totalForms: prev.totalForms + 1 }))
   }
@@ -107,6 +107,7 @@ export default function DashboardPage() {
                 </Button>
               </CreateFormDialog>
               <span className="text-sm text-muted-foreground hidden sm:block">Welcome, {user?.name}</span>
+              <span className="text-sm text-muted-foreground hidden sm:block">Welcome, {profile?.name}</span>
               <Button variant="ghost" onClick={signOut} className="font-medium">
                 <Icon icon="solar:logout-2-bold-duotone" className="w-4 h-4 mr-2" />
                 Sign Out

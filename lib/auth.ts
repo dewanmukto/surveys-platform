@@ -1,90 +1,122 @@
-export interface User {
+import { supabase } from './supabase'
+import type { User } from '@supabase/supabase-js'
+
+export interface Profile {
   id: string
   name: string
   email: string
-  createdAt: string
+  avatar_url: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface AuthState {
   user: User | null
+  profile: Profile | null
   isLoading: boolean
   isAuthenticated: boolean
 }
 
-// Simple in-memory storage for demo (in production, use proper database)
-const users: Array<User & { password: string }> = []
-
 export class AuthService {
-  static async signUp(name: string, email: string, password: string): Promise<{ user: User; token: string }> {
-    // Check if user already exists
-    const existingUser = users.find((u) => u.email === email)
-    if (existingUser) {
-      throw new Error("User already exists")
-    }
-
-    // Create new user
-    const user: User & { password: string } = {
-      id: Math.random().toString(36).substr(2, 9),
-      name,
+  static async signUp(name: string, email: string, password: string): Promise<{ user: User; profile: Profile }> {
+    const { data, error } = await supabase.auth.signUp({
       email,
-      password, // In production, hash this password
-      createdAt: new Date().toISOString(),
-    }
+      password,
+      options: {
+        data: {
+          name,
+        },
+      },
+    })
 
-    users.push(user)
+    if (error) throw error
+    if (!data.user) throw new Error('Failed to create user')
 
-    // Generate simple token (in production, use JWT)
-    const token = btoa(JSON.stringify({ userId: user.id, email: user.email }))
+    // Create profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .insert({
+        id: data.user.id,
+        name,
+        email,
+      })
+      .select()
+      .single()
 
-    return {
-      user: { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt },
-      token,
-    }
+    if (profileError) throw profileError
+
+    return { user: data.user, profile }
   }
 
-  static async signIn(email: string, password: string): Promise<{ user: User; token: string }> {
-    const user = users.find((u) => u.email === email && u.password === password)
-    if (!user) {
-      throw new Error("Invalid credentials")
-    }
+  static async signIn(email: string, password: string): Promise<{ user: User; profile: Profile }> {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-    // Generate simple token
-    const token = btoa(JSON.stringify({ userId: user.id, email: user.email }))
+    if (error) throw error
+    if (!data.user) throw new Error('Failed to sign in')
 
-    return {
-      user: { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt },
-      token,
-    }
+    // Get profile
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .single()
+
+    if (profileError) throw profileError
+
+    return { user: data.user, profile }
   }
 
-  static async verifyToken(token: string): Promise<User | null> {
-    try {
-      const decoded = JSON.parse(atob(token))
-      const user = users.find((u) => u.id === decoded.userId)
-      if (!user) return null
+  static async getCurrentUser(): Promise<{ user: User; profile: Profile } | null> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
 
-      return { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt }
-    } catch {
-      return null
-    }
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single()
+
+    if (error) return null
+
+    return { user, profile }
   }
 
-  static setToken(token: string) {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("auth_token", token)
-    }
+  static async signOut(): Promise<void> {
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
   }
 
-  static getToken(): string | null {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("auth_token")
-    }
-    return null
+  static onAuthStateChange(callback: (user: User | null, profile: Profile | null) => void) {
+    return supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single()
+        
+        callback(session.user, profile)
+      } else {
+        callback(null, null)
+      }
+    })
   }
 
-  static removeToken() {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("auth_token")
-    }
+  static async updateProfile(updates: Partial<Profile>): Promise<Profile> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('Not authenticated')
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', user.id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
   }
 }
